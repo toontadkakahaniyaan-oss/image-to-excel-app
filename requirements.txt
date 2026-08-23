@@ -1,5 +1,6 @@
 streamlit
-huggingface_hub
+easyocr
 pandas
 openpyxl
 pillow
+numpy
