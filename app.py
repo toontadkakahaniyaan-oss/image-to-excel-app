@@ -1,77 +1,88 @@
 import streamlit as st
 import pandas as pd
-from io import StringIO, BytesIO
+import numpy as np
+from io import BytesIO
 from PIL import Image
-import base64
-from huggingface_hub import InferenceClient
-
-api_key = st.secrets.get("HF_TOKEN") if "HF_TOKEN" in st.secrets else st.sidebar.text_input("Hugging Face Free Token", type="password")
+import easyocr
 
 st.set_page_config(page_title="Image to Excel Converter", layout="wide")
-st.title("📊 Image to Excel / Data Converter")
+st.title("📊 Image to Excel Converter (Offline / Free)")
+st.write("Extracts text, numbers, and tabular data directly into Excel without external API keys.")
 
-if not api_key:
-    st.warning("Sidebar me Hugging Face Free Token dalein.")
-else:
-    client = InferenceClient(api_key=api_key)
+@st.cache_resource
+def load_ocr_reader():
+    return easyocr.Reader(['en'], gpu=False)
 
-uploaded_file = st.file_uploader("Upload Image (Table, Chart, Notes)", type=["jpg", "jpeg", "png"])
-user_prompt = st.text_input("Formatting Instructions", "Extract all tabular and key data accurately into CSV table format.")
+reader = load_ocr_reader()
 
-if uploaded_file and api_key and st.button("Convert to Excel"):
-    img = Image.open(uploaded_file)
-    st.image(img, caption="Uploaded Image", width=400)
+uploaded_file = st.file_uploader("Upload Image (Table, Progress Report, Chart, Notes)", type=["jpg", "jpeg", "png"])
+
+if uploaded_file and st.button("Convert to Excel"):
+    img = Image.open(uploaded_file).convert('RGB')
+    st.image(img, caption="Uploaded Image", width=450)
     
-    with st.spinner("AI is processing and creating Excel..."):
-        uploaded_file.seek(0)
-        base64_image = base64.b64encode(uploaded_file.read()).decode('utf-8')
+    with st.spinner("Extracting table data directly from image..."):
+        img_np = np.array(img)
         
-        prompt_text = f"""
-        User instruction: '{user_prompt}'.
-        Extract all table columns, rows, and structured data accurately from this image.
-        Format STRICTLY as valid standard CSV text with comma separators.
-        Do NOT wrap in markdown code blocks (no ```csv or ```).
-        Do NOT add intro sentences or conversation. Only raw CSV rows.
-        """
+        # EasyOCR text and bounding box detection
+        results = reader.readtext(img_np)
         
-        try:
-            response = client.chat.completions.create(
-                model="Qwen/Qwen2.5-VL-7B-Instruct",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt_text},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=2048
-            )
+        if not results:
+            st.warning("Image me koi readable text ya data nahi mila.")
+        else:
+            # Sort detected text vertically then horizontally to maintain tabular rows
+            # item[0] = bounding box coords [[x1,y1], [x2,y2], [x3,y3], [x4,y4]], item[1] = text
+            data_rows = []
             
-            raw_text = response.choices[0].message.content.strip().replace("```csv", "").replace("```", "").strip()
+            # Group items based on Y coordinates (row clustering)
+            sorted_by_y = sorted(results, key=lambda r: r[0][0][1])
             
-            df = pd.read_csv(StringIO(raw_text))
+            current_row = []
+            last_y = None
+            row_threshold = 18 # pixel distance to group into same row
+            
+            for item in sorted_by_y:
+                y_coord = item[0][0][1]
+                x_coord = item[0][0][0]
+                text = item[1].strip()
+                
+                if last_y is None or abs(y_coord - last_y) < row_threshold:
+                    current_row.append((x_coord, text))
+                    if last_y is None:
+                        last_y = y_coord
+                else:
+                    # Sort row items from left to right (X axis)
+                    current_row.sort(key=lambda x: x[0])
+                    data_rows.append([t[1] for t in current_row])
+                    current_row = [(x_coord, text)]
+                    last_y = y_coord
+                    
+            if current_row:
+                current_row.sort(key=lambda x: x[0])
+                data_rows.append([t[1] for t in current_row])
+            
+            # Pad rows so they have equal columns for clean DataFrame conversion
+            max_cols = max(len(row) for row in data_rows) if data_rows else 1
+            padded_rows = [row + [''] * (max_cols - len(row)) for row in data_rows]
+            
+            # First row as header if available, otherwise default columns
+            if len(padded_rows) > 1:
+                df = pd.DataFrame(padded_rows[1:], columns=padded_rows[0])
+            else:
+                df = pd.DataFrame(padded_rows)
             
             st.success("Extraction Complete!")
             st.write("### Data Preview:")
             st.dataframe(df, use_container_width=True)
             
+            # Excel export
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False)
             
             st.download_button(
-                label="📥 Download Excel (.xlsx)",
+                label="📥 Download Excel File (.xlsx)",
                 data=output.getvalue(),
-                file_name="extracted_data.xlsx",
+                file_name="extracted_table.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        except Exception as e:
-            st.error(f"Error: {e}")
-            if 'raw_text' in locals():
-                st.text_area("Extracted Raw CSV", raw_text)
-                st.download_button("Download Raw CSV", raw_text, file_name="data.csv")
