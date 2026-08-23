@@ -30,7 +30,7 @@ if uploaded_file and api_key and st.button("Convert to Excel"):
         """
         
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
             response = model.generate_content([system_instruction, img])
             raw_text = response.text.strip().replace("```csv", "").replace("```", "").strip()
             
