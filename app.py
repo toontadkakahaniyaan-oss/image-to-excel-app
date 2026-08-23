@@ -29,11 +29,46 @@ if uploaded_file and api_key and st.button("Convert to Excel"):
         Do not add code blocks (no ```csv), no markdown explanations, and no intro sentences. Only raw CSV rows.
         """
         
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
-            response = model.generate_content([system_instruction, img])
-            raw_text = response.text.strip().replace("```csv", "").replace("```", "").strip()
-            
+        # Available models ki priority list
+        candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-1.5-flash']
+        
+        response = None
+        for model_name in candidate_models:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content([system_instruction, img])
+                if response:
+                    break
+            except Exception:
+                continue
+
+        if response is None:
+            st.error("Model connect nahi ho paya. Kripya check karein ki API Key sahi hai.")
+        else:
+            try:
+                raw_text = response.text.strip().replace("```csv", "").replace("```", "").strip()
+                
+                # Convert CSV string to DataFrame
+                df = pd.read_csv(StringIO(raw_text))
+                
+                st.success("Extraction Complete!")
+                st.write("### Data Preview:")
+                st.dataframe(df, use_container_width=True)
+                
+                # Excel export
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False)
+                
+                st.download_button(
+                    label="📥 Download Excel (.xlsx)",
+                    data=output.getvalue(),
+                    file_name="extracted_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except Exception as e:
+                st.error(f"Error structuring data: {e}")
+                st.text_area("Raw Extracted Output", response.text)
             # Convert CSV string to DataFrame
             df = pd.read_csv(StringIO(raw_text))
             
