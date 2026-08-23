@@ -52,7 +52,8 @@ if uploaded_file and api_key and st.button("Convert to Excel"):
                         ],
                     }
                 ],
-                model="llama-3.2-11b-vision-preview",
+                model="llama-3.2-90b-vision-preview",
+        
             )
             
             raw_text = chat_completion.choices[0].message.content.strip().replace("```csv", "").replace("```", "").strip()
