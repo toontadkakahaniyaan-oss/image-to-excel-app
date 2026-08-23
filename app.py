@@ -373,7 +373,10 @@ def friendly_error(e: Exception) -> str:
     if "401" in msg or "invalid api key" in lower or "unauthorized" in lower or "authentication" in lower:
         return "Invalid API key. Please double-check the key in the sidebar."
     if "429" in msg or "rate limit" in lower or "quota" in lower:
-        return "Rate limit or quota reached on the provider's side. Please wait a moment and try again."
+        return (
+            "Rate limit or quota reached. If you're on a free OpenRouter model, wait a minute "
+            "(free tier ≈ 20 requests/min, 50/day) or try again shortly."
+        )
     if "timeout" in lower or "timed out" in lower:
         return "The request timed out. Try again, use a smaller/clearer image, or switch models."
     if "connection" in lower or "network" in lower:
@@ -653,6 +656,8 @@ with st.sidebar:
     if provider == "OpenRouter":
         base_url = "https://openrouter.ai/api/v1"
         model_options = [
+            "nvidia/nemotron-nano-12b-v2-vl:free  🆓",
+            "openrouter/free  🆓 (auto-router)",
             "google/gemini-2.5-flash",
             "openai/gpt-4o",
             "anthropic/claude-3.5-sonnet",
@@ -667,13 +672,25 @@ with st.sidebar:
     if model_choice == "Custom...":
         model = st.text_input("Custom model ID", placeholder="e.g. mistralai/pixtral-large-2411")
     else:
-        model = model_choice
+        # strip the display-only "🆓" badge / notes to get the real model ID sent to the API
+        model = model_choice.split("  ")[0].strip()
+
+    if provider == "OpenRouter" and "🆓" in model_choice:
+        st.success(
+            "This model is free on OpenRouter — no credit card needed. "
+            "Free tier is rate-limited (~20 req/min, 50/day), so give it a few seconds between conversions."
+        )
 
     with st.expander("🎛️ Advanced settings"):
         temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.05, help="Lower = more literal/consistent extraction.")
         max_tokens = st.slider("Max output tokens", 1024, 8192, 4096, 512)
 
     st.markdown("---")
+    if provider == "OpenRouter":
+        st.caption(
+            "🆓 Get a free key (no card) at [openrouter.ai/keys](https://openrouter.ai/keys) — "
+            "sign in with email or GitHub, generate a key, paste it above."
+        )
     st.caption("🔒 DocuMorph AI never stores your images or API keys — everything runs within this browser session.")
 
     if st.session_state.converted_once:
